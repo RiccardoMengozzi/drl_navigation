@@ -1,25 +1,25 @@
 from rclpy.node import Node
 import time
 import numpy as np
+import random
+from scipy.spatial.transform import Rotation as R
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid
 from tf2_msgs.msg import TFMessage
-from geometry_msgs.msg import Twist, PoseStamped, Vector3
+from geometry_msgs.msg import Twist, PoseStamped, PoseArray
 from rosgraph_msgs.msg import Clock
 from custom_interfaces.msg import EnvsProperties
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
-from tb3_multi_env_spawner import utils
 
 
 class ROSInterface(Node):
     def __init__(self, namespace: str):
         super().__init__(namespace=namespace, node_name='ros_interface')
         self.namespace = namespace
-        print(f"{self.namespace}, PORCOIDDIOOOOOOOOOOOOOOOOoo")
 
 
         self.map_msg = None
@@ -27,8 +27,14 @@ class ROSInterface(Node):
         self.tf_msg = None
         self.tf_map2odom = None
         self.tf_odom2foot = None
+        self.robot_pose = None
         self.gazebo_clock_msg = None
         self.env_properties = None
+
+        ### DEBUGGING ###
+        self.chosen_goals_list = PoseArray()
+        self.chosen_goals_list_pub = self.create_publisher(PoseArray, f'/{self.namespace}/goals_pose_list', 10)
+        #################
 
         clock_qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -80,31 +86,31 @@ class ROSInterface(Node):
 
     def get_robot_pose(self):
         if self.tf_odom2foot is not None and self.tf_map2odom is not None:
-            from scipy.spatial.transform import Rotation as R
 
             # Extract position and quaternion
-            p_o2f = np.array([self.tf_odom2foot.translation.x,
+            self.p_o2f = np.array([self.tf_odom2foot.translation.x,
                             self.tf_odom2foot.translation.y])
+                            
 
             q_o2f = np.array([self.tf_odom2foot.rotation.x,
                             self.tf_odom2foot.rotation.y,
                             self.tf_odom2foot.rotation.z,
                             self.tf_odom2foot.rotation.w])
 
-            p_m2o = np.array([self.tf_map2odom.translation.x,
+            self.p_m2o = np.array([self.tf_map2odom.translation.x,
                             self.tf_map2odom.translation.y])
-
+            
             q_m2o = np.array([self.tf_map2odom.rotation.x,
                             self.tf_map2odom.rotation.y,
                             self.tf_map2odom.rotation.z,
                             self.tf_map2odom.rotation.w])
 
             # Convert quaternions to rotation matrices
-            R_m2o = R.from_quat(q_m2o).as_matrix()
-            R_o2f = R.from_quat(q_o2f).as_matrix()
+            self.R_m2o = R.from_quat(q_m2o).as_matrix()
+            self.R_o2f = R.from_quat(q_o2f).as_matrix()
 
             # Compute robot position
-            robot_position = p_m2o + R_m2o[:2, :2] @ p_o2f  # Only use 2D components
+            robot_position = self.p_m2o + self.R_m2o[:2, :2] @ self.p_o2f  # Only use 2D components
 
             # Compute yaw relative to the map frame
             yaw_m2o = R.from_quat(q_m2o).as_euler('xyz', degrees=False)[2]  # Yaw of odom in map
@@ -118,13 +124,14 @@ class ROSInterface(Node):
             robot_angle_sin = np.sin(robot_angle)
             robot_angle_cos = np.cos(robot_angle)
 
-
+            
             self.robot_pose = [robot_position[0], robot_position[1], robot_angle]
+            print(f"[{self.namespace}] robot_pose: {self.robot_pose}")
 
-            # Debug print for first environment
-            if self.namespace == 'env_0':
-                print(f"[{self.namespace}] robot_pose: {self.robot_pose}")
-                print("cos, sin: ", robot_angle_cos, robot_angle_sin)
+            # # Debug print for first environment
+            # if self.namespace == 'env_0':
+            #     print(f"[{self.namespace}] robot_pose: {self.robot_pose}")
+            #     print("cos, sin: ", robot_angle_cos, robot_angle_sin)
             return self.robot_pose
         
         else:
@@ -165,7 +172,9 @@ class ROSInterface(Node):
     def create_pose_stamped(self, frame_id, pose):
         pose_msg = PoseStamped()
         pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"
+        # actually the pose should be respect the 'odom' frame, that is in the center of the map,
+        # however rviz will show the marker only if the frame_id is 'map', so the position is compensated.
+        pose_msg.header.frame_id = frame_id
         pose_msg.pose.position.x = pose[0]
         pose_msg.pose.position.y = pose[1]
         pose_msg.pose.position.z = 0.0
@@ -175,15 +184,45 @@ class ROSInterface(Node):
 
     ## GOAL POSE ##
 
-    def set_random_goal_pose(self):
-        center = (self.env_properties.center[0], self.env_properties.center[1])
-        self.goal_pose = utils.get_random_pose(self.env_properties.file_path, center)
+    def set_random_goal_pose(self, max_distance):
+        x_start = self.env_properties.x_start
+        y_start = self.env_properties.y_start
+        resolution = self.env_properties.resolution
+        x_center = self.env_properties.center[0]
+        y_center = self.env_properties.center[1]
+        
+
+        # Restore 2d grid from 1d flatten array
+        grid = np.array(self.env_properties.grid).reshape(self.env_properties.grid_size)
+        # Find the indices of the cells where the value is 1 (points inside the environment free of obstacles)
+        indices = np.argwhere(grid == 1)
+        
+        goal_distance = 100000
+        while goal_distance > max_distance:
+            # Select a random index and remove it after (to speed up the search process)
+            random_index = random.choice(indices)
+            indices = np.delete(indices, np.where((indices == random_index).all(axis=1)), axis=0)
+            # goal_pose wrt to "odom" frame_id
+            goal_position_odom = [x_start + random_index[0] * resolution + x_center, 
+                                  y_start + random_index[1] * resolution + y_center] 
+            # goal_pose wrt to "map"
+            goal_position_map = self.R_m2o[:2,:2] @ goal_position_odom[:2] + self.p_m2o 
+            goal_distance = np.linalg.norm(goal_position_map - self.robot_pose[:2])
+
+        random_yaw = np.random.uniform(0, 2*np.pi)
+        self.goal_pose = [goal_position_map[0], goal_position_map[1], random_yaw]
         self.publish_goal_pose()
         return self.goal_pose
 
     def publish_goal_pose(self):
+        print(f"[{self.namespace}] Publishing goal pose: {self.goal_pose}, distance: \
+              {np.linalg.norm(np.array(self.goal_pose)[:2] - np.array(self.robot_pose)[:2])}")
         goal_pose_stamped = self.create_pose_stamped(frame_id='map', pose=self.goal_pose)
-        self.goal_pose_stamped_pub.publish(goal_pose_stamped)
+        self.chosen_goals_list.poses.append(goal_pose_stamped.pose)
+        self.chosen_goals_list.header.stamp = self.get_clock().now().to_msg()
+        self.chosen_goals_list.header.frame_id = 'map'
+        self.chosen_goals_list_pub.publish(self.chosen_goals_list)
+        # self.goal_pose_stamped_pub.publish(goal_pose_stamped)
 
     ## RVIZ MARKERS ##
     # def publish_goal_pose(self):

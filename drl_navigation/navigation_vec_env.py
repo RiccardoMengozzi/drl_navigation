@@ -13,7 +13,7 @@ MAX_ANGULAR_VELOCITY = 1.5
 MIN_SCAN_RANGE = 0.12
 MAX_SCAN_RANGE = 3.5
 
-MAX_GOAL_DISTANCE = 5.0
+MAX_GOAL_DISTANCE = 5
 
 
 
@@ -25,7 +25,11 @@ class NavigationEnv(gym.Env):
 
         self.goal_pose = np.array([0.0, 0.0, 0.0])
 
+        # Be sure all the callbacks have been called at least once
         self.wait_for_first_msgs(['scan_msg', 'tf_map2odom', 'tf_odom2foot','gazebo_clock_msg', 'env_properties'])
+        # Be sure the robot pose is not None
+        self.ros_int.get_robot_pose()
+
         self._init_obs_space()
         self._init_action_space()
 
@@ -42,6 +46,7 @@ class NavigationEnv(gym.Env):
                     if getattr(self.ros_int, msg) is None:
                         print(f"[{self.namespace}] Waiting for {msg}")
             pass
+        print(f"[{self.namespace}] All messages received")
 
 
     def _init_obs_space(self):
@@ -60,8 +65,9 @@ class NavigationEnv(gym.Env):
 
     def _get_obs(self):
         scan_ranges = np.array(self.ros_int.get_scan_ranges())
-        scan_ranges = self.normalize(scan_ranges, MIN_SCAN_RANGE, MAX_SCAN_RANGE)
         robot_pose = np.array(self.ros_int.get_robot_pose())
+
+        scan_ranges = self.normalize(scan_ranges, MIN_SCAN_RANGE, MAX_SCAN_RANGE)
 
         # if self.namespace == 'env_0': print(f"[{self.namespace}] robot_pose: {self.ros_int.get_robot_pose()}")
 
@@ -118,7 +124,7 @@ class NavigationEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.goal_pose = self.ros_int.set_random_goal_pose()
+        self.goal_pose = self.ros_int.set_random_goal_pose(max_distance=MAX_GOAL_DISTANCE)
         # print(f"[{self.namespace}] New goal pose: {self.goal_pose}")
         obs = self._get_obs()
         info = self._get_info()
