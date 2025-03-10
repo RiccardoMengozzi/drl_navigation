@@ -2,25 +2,36 @@ from rclpy.node import Node
 import time
 import numpy as np
 import random
+import rclpy
+import threading
+from threading import Event
 from scipy.spatial.transform import Rotation as R
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
+from rclpy.executors import SingleThreadedExecutor
 
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Odometry
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Twist, PoseStamped, PoseArray
 from rosgraph_msgs.msg import Clock
 from custom_interfaces.msg import EnvsProperties
+from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
 
 
-class ROSInterface(Node):
+class ROSInterface:
     def __init__(self, namespace: str):
-        super().__init__(namespace=namespace, node_name='ros_interface')
         self.namespace = namespace
 
+        rclpy.init()
+        self.node = Node(node_name='ros_interface', namespace=self.namespace)
+
+        executor = SingleThreadedExecutor()
+        executor.add_node(self.node)
+        executor_thread = threading.Thread(target=executor.spin, daemon=True)
+        executor_thread.start()
 
         self.map_msg = None
         self.scan_msg = None
@@ -30,10 +41,11 @@ class ROSInterface(Node):
         self.robot_pose = None
         self.gazebo_clock_msg = None
         self.env_properties = None
+        self.odom_msg = None
 
         ### DEBUGGING ###
         self.chosen_goals_list = PoseArray()
-        self.chosen_goals_list_pub = self.create_publisher(PoseArray, f'/{self.namespace}/goals_pose_list', 10)
+        self.chosen_goals_list_pub = self.node.create_publisher(PoseArray, f'/{self.namespace}/goals_pose_list', 10)
         #################
 
         clock_qos_profile = QoSProfile(
@@ -41,15 +53,42 @@ class ROSInterface(Node):
             depth=10
         )
 
-        self.map_sub = self.create_subscription(OccupancyGrid, f'/{self.namespace}/map', self._map_callback, 10)
-        self.scan_sub = self.create_subscription(LaserScan, f'/{self.namespace}/scan', self._scan_callback, 10)
-        self.tf_sub = self.create_subscription(TFMessage, f'/{self.namespace}/tf', self._tf_callback, 100)
-        self.gazebo_clock_sub = self.create_subscription(Clock, '/clock', self._gazebo_clock_callback, clock_qos_profile)
-        self.envs_properties_sub = self.create_subscription(EnvsProperties, '/envs_properties', self._envs_properties_callback, 10)
+        self.map_sub = self.node.create_subscription(OccupancyGrid, f'/{self.namespace}/map', self._map_callback, 10)
+        self.scan_sub = self.node.create_subscription(LaserScan, f'/{self.namespace}/scan', self._scan_callback, 10)
+        self.tf_sub = self.node.create_subscription(TFMessage, f'/{self.namespace}/tf', self._tf_callback, 100)
+        self.gazebo_clock_sub = self.node.create_subscription(Clock, '/clock', self._gazebo_clock_callback, clock_qos_profile)
+        self.envs_properties_sub = self.node.create_subscription(EnvsProperties, '/envs_properties', self._envs_properties_callback, 10)
+        self.odom_sub = self.node.create_subscription(Odometry, f'/{self.namespace}/odom', self._odom_callback, 10)
 
-        self.cmd_vel_pub = self.create_publisher(Twist, f'/{self.namespace}/cmd_vel', 10)
-        self.goal_pose_stamped_pub = self.create_publisher(PoseStamped, f'/{self.namespace}/goal_pose', 10)
+        self.cmd_vel_pub = self.node.create_publisher(Twist, f'/{self.namespace}/cmd_vel', 10)
+        self.goal_pose_stamped_pub = self.node.create_publisher(PoseStamped, f'/{self.namespace}/goal_pose', 10)
 
+
+        self.reset_environemnt_client = self.node.create_client(Trigger, f'/{self.namespace}/reset_environment')
+
+        
+
+
+   ## RESET SERVICE ##
+    def reset_environment(self):
+        self.node.get_logger().info(f" Resetting environment...")
+        while not self.reset_environemnt_client.wait_for_service(timeout_sec=1.0):
+            pass
+        self.node.get_logger().info('Connected!')
+
+        request = Trigger.Request()
+
+        future = self.reset_environemnt_client.call_async(request)
+        return future
+
+
+    ## ODOM DATA ##
+    def _odom_callback(self, msg):
+        self.odom_msg = Odometry()
+        self.odom_msg = msg
+
+    def get_angular_velocity(self):
+        return self.odom_msg.twist.twist.angular.z 
 
     ## MAP DATA ##
 
@@ -71,7 +110,10 @@ class ROSInterface(Node):
         self.scan_msg = msg
 
     def get_scan_ranges(self):
-        return self.scan_msg.ranges
+        return np.array(self.scan_msg.ranges)
+    
+    def get_scan_bounds(self):
+        return self.scan_msg.range_min, self.scan_msg.range_max
 
     ## POSE DATA ##
 
@@ -125,8 +167,7 @@ class ROSInterface(Node):
             robot_angle_cos = np.cos(robot_angle)
 
             
-            self.robot_pose = [robot_position[0], robot_position[1], robot_angle]
-            print(f"[{self.namespace}] robot_pose: {self.robot_pose}")
+            self.robot_pose = np.array([robot_position[0], robot_position[1], robot_angle])
 
             # # Debug print for first environment
             # if self.namespace == 'env_0':
@@ -171,7 +212,7 @@ class ROSInterface(Node):
     ## POSE DATA ##
     def create_pose_stamped(self, frame_id, pose):
         pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.stamp = self.node.get_clock().now().to_msg()
         # actually the pose should be respect the 'odom' frame, that is in the center of the map,
         # however rviz will show the marker only if the frame_id is 'map', so the position is compensated.
         pose_msg.header.frame_id = frame_id
@@ -210,19 +251,20 @@ class ROSInterface(Node):
             goal_distance = np.linalg.norm(goal_position_map - self.robot_pose[:2])
 
         random_yaw = np.random.uniform(0, 2*np.pi)
-        self.goal_pose = [goal_position_map[0], goal_position_map[1], random_yaw]
+        self.goal_pose = np.array([goal_position_map[0], goal_position_map[1], random_yaw])
         self.publish_goal_pose()
         return self.goal_pose
 
     def publish_goal_pose(self):
-        print(f"[{self.namespace}] Publishing goal pose: {self.goal_pose}, distance: \
-              {np.linalg.norm(np.array(self.goal_pose)[:2] - np.array(self.robot_pose)[:2])}")
+        distance = np.linalg.norm(self.goal_pose[:2] - self.robot_pose[:2])
+        self.node.get_logger().info(f"[{self.namespace}] Publishing goal pose: {np.round(self.goal_pose, 2)}, distance: {distance:.2f}")
         goal_pose_stamped = self.create_pose_stamped(frame_id='map', pose=self.goal_pose)
-        self.chosen_goals_list.poses.append(goal_pose_stamped.pose)
-        self.chosen_goals_list.header.stamp = self.get_clock().now().to_msg()
-        self.chosen_goals_list.header.frame_id = 'map'
-        self.chosen_goals_list_pub.publish(self.chosen_goals_list)
-        # self.goal_pose_stamped_pub.publish(goal_pose_stamped)
+        self.goal_pose_stamped_pub.publish(goal_pose_stamped)
+
+        # self.chosen_goals_list.poses.append(goal_pose_stamped.pose)
+        # self.chosen_goals_list.header.stamp = self.get_clock().now().to_msg()
+        # self.chosen_goals_list.header.frame_id = 'map'
+        # self.chosen_goals_list_pub.publish(self.chosen_goals_list)
 
     ## RVIZ MARKERS ##
     # def publish_goal_pose(self):
