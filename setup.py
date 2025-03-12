@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            f'{package_name} = {package_name}.agent:main'
+            f'agent = drl_navigation.agent:main',
+            f'memory_usage_checker = drl_navigation.memory_usage_checker:main'
         ],
     },
 )

@@ -15,6 +15,7 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import Twist, PoseStamped, PoseArray
 from rosgraph_msgs.msg import Clock
 from custom_interfaces.msg import EnvsProperties
+from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
@@ -42,6 +43,7 @@ class ROSInterface:
         self.gazebo_clock_msg = None
         self.env_properties = None
         self.odom_msg = None
+        self.reset_gazebo_msg = None
 
         ### DEBUGGING ###
         self.chosen_goals_list = PoseArray()
@@ -59,6 +61,7 @@ class ROSInterface:
         self.gazebo_clock_sub = self.node.create_subscription(Clock, '/clock', self._gazebo_clock_callback, clock_qos_profile)
         self.envs_properties_sub = self.node.create_subscription(EnvsProperties, '/envs_properties', self._envs_properties_callback, 10)
         self.odom_sub = self.node.create_subscription(Odometry, f'/{self.namespace}/odom', self._odom_callback, 10)
+        self.reset_gazebo_sub = self.node.create_subscription(Bool, '/reset_gazebo_topic', self._reset_gazebo_callback, 10)
 
         self.cmd_vel_pub = self.node.create_publisher(Twist, f'/{self.namespace}/cmd_vel', 10)
         self.goal_pose_stamped_pub = self.node.create_publisher(PoseStamped, f'/{self.namespace}/goal_pose', 10)
@@ -69,7 +72,7 @@ class ROSInterface:
         
 
 
-   ## RESET SERVICE ##
+   ## RESET SERVICES ##
     def reset_environment(self):
         self.node.get_logger().info(f" Resetting environment...")
         while not self.reset_environemnt_client.wait_for_service(timeout_sec=1.0):
@@ -80,6 +83,13 @@ class ROSInterface:
 
         future = self.reset_environemnt_client.call_async(request)
         return future
+
+    def _reset_gazebo_callback(self, msg):
+        self.reset_gazebo_msg = Bool()
+        self.reset_gazebo_msg = msg
+
+    def get_reset_gazebo_msg(self):
+        return self.reset_gazebo_msg.data
 
 
     ## ODOM DATA ##

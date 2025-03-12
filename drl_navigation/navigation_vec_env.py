@@ -10,25 +10,38 @@ ACTION_PERIOD = 0.2
 MAX_LINEAR_VELOCITY = 0.22
 MAX_ANGULAR_VELOCITY = 1.5
 
-MIN_SCAN_RANGE = 0.12
-MAX_SCAN_RANGE = 3.5
+MAX_GOAL_DISTANCE = 2.0
 
-MAX_GOAL_DISTANCE = 5
+COLLISION_THRESHOLD = 0.12
+GOAL_DISTANCE_TOLERANCE = 0.2
+GOAL_ANGLE_TOLERANCE = 0.1 # ~5°
+
+
 
 
 
 class NavigationEnv(gym.Env):
-    def __init__(self, namespace: str, ros_interface: ROSInterface):
+    def __init__(self, ros_interface: ROSInterface, max_episode_steps = 1000) -> None:
         super().__init__()
-        self.namespace = namespace
         self.ros_int = ros_interface
+        self.namespace = self.ros_int.namespace
+
+        self.max_episode_steps = max_episode_steps
 
         self.goal_pose = np.array([0.0, 0.0, 0.0])
+        self.total_angle = 0.0
+        self.last_time = 0.0
+        self.step_count = 0
+        self.is_resetting = False        
+        self.reset_future = None
+
 
         # Be sure all the callbacks have been called at least once
-        self.wait_for_first_msgs(['scan_msg', 'tf_map2odom', 'tf_odom2foot','gazebo_clock_msg', 'env_properties'])
+        self.wait_for_first_msgs(['tf_map2odom', 'tf_odom2foot','gazebo_clock_msg', 'env_properties', 'odom_msg', 'reset_gazebo_msg'])
         # Be sure the robot pose is not None
         self.ros_int.get_robot_pose()
+
+        
 
         self._init_obs_space()
         self._init_action_space()
@@ -51,8 +64,8 @@ class NavigationEnv(gym.Env):
 
     def _init_obs_space(self):
         self.observation_space = spaces.Dict({
-            'scan': spaces.Box(low=0, high=1, shape=(360,), dtype=np.float32),
-            'goal_rel_pose': spaces.Box(low=0, high=1, shape=(3,), dtype=np.float32),            
+            'scan': spaces.Box(low=-1, high=1, shape=(360,), dtype=np.float32),
+            'goal_rel_pose': spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32),            
         })
 
     def _init_action_space(self):
@@ -60,14 +73,39 @@ class NavigationEnv(gym.Env):
 
 
     def normalize(self, data, min, max):
-        return (data - min) / (max - min)
+        data = np.clip(data, min, max)
+        return 2*((data - min) / (max - min)) - 1
+    
+
+    def detect_collision(self, scan_ranges):
+        collision = False
+        for scan in scan_ranges:
+            if scan < COLLISION_THRESHOLD:
+                collision = True
+                break
+        return collision
+    
+    def is_goal_reached(self, distance, angle_diff):
+        # env_cheker only works with python-bools (not numpy)   
+        return bool(distance < GOAL_DISTANCE_TOLERANCE and angle_diff < GOAL_ANGLE_TOLERANCE)
+    
+    def get_total_angle(self):
+        angular_velocity = self.ros_int.get_angular_velocity()
+        dt = self.ros_int.get_gazebo_time() - self.last_time
+        self.last_time = self.ros_int.get_gazebo_time()
+        self.total_angle += abs(angular_velocity) * dt
+        return self.total_angle
+    
+    def is_gazebo_resetting(self):
+        return self.ros_int.get_reset_gazebo_msg()
 
 
     def _get_obs(self):
         scan_ranges = np.array(self.ros_int.get_scan_ranges())
         robot_pose = np.array(self.ros_int.get_robot_pose())
 
-        scan_ranges = self.normalize(scan_ranges, MIN_SCAN_RANGE, MAX_SCAN_RANGE)
+        scan_ranges_bounds = self.ros_int.get_scan_bounds()
+        scan_ranges = self.normalize(scan_ranges, scan_ranges_bounds[0], scan_ranges_bounds[1])
 
         # if self.namespace == 'env_0': print(f"[{self.namespace}] robot_pose: {self.ros_int.get_robot_pose()}")
 
@@ -79,17 +117,85 @@ class NavigationEnv(gym.Env):
         # print(f"[{self.namespace}] goal_rel_pose: {goal_rel_pose}")
 
         return {
-            'scan': scan_ranges,
-            'goal_rel_pose': goal_rel_pose,
+            'scan': np.array(scan_ranges, dtype=np.float32),
+            'goal_rel_pose': np.array(goal_rel_pose, dtype=np.float32),
         }
+    
+    def total_angle_reward(self, x, a, k):
+        # sigmoid
+        return 1/(1+np.exp(-a*(x+k)))
+    
+    def angle_diff(self, angle1, angle2):
+        return np.abs((angle1 - angle2 + np.pi) % (2 * np.pi) - np.pi) # ensures minimum angular difference
+    
+    def distance(self, pose1, pose2):
+        return np.linalg.norm(pose1[:2] - pose2[:2])
+    
+    def _get_reward(self):
+        scan_ranges = self.ros_int.get_scan_ranges()
+        robot_pose = self.ros_int.get_robot_pose()
+        goal_pose = self.goal_pose
 
-    def _get_reward(self, observation):
-        pass
+        W1, W2, W3, W4, W5 = -1, -1/np.pi*5, -5, -10, 20
 
-    def _get_done(self):
-        pass
+        distance = self.distance(goal_pose, robot_pose)
+        angle_diff = self.angle_diff(goal_pose[2], robot_pose[2])
+        total_angle = self.get_total_angle()
+        collision = self.detect_collision(scan_ranges)
+        goal_reached = self.is_goal_reached(distance, angle_diff)
 
-    def _get_truncated(self, observation):
+        r1 = W1*distance
+        r2 = W2*angle_diff
+        r3 = W3*self.total_angle_reward(total_angle, a = 0.6, k=-8)
+        r4 = W4*collision
+        r5 = W5*goal_reached
+
+        total_reward = r1 + r2 + r3 + r4 + r5
+        #rewards intervals
+        #distance: [-MAX_DISTANCE, 0]
+        #angle_diff: [-5, 0]
+        #total_angle: [-5 (slow until 4-5 radians of total angle, fast after), 0]
+        #collision: [-10, 0]
+        #goal_reached: [0, 20]
+        
+#         print(f"""
+# {'=' * 50}
+# Environment: {self.namespace}, step: {self.step_count}
+# {'=' * 50}
+# {'Metric':<15}{'Value':<10}{'Weight':<10}{'Weighted Contribution'}
+# {'-' * 50}
+# {'Distance':<15}{distance:<10.2f}{W1:<10}{r1:.2f}
+# {'Angle Diff':<15}{angle_diff:<10.2f}{W2:<10.2f}{r2:.2f}
+# {'Total Angle':<15}{total_angle:<10.2f}{r3/total_angle:<10.2f}{r3:.2f}
+# {'Collision':<15}{collision:<10}{W4:<10}{r4:.2f}
+# {'Goal Reached':<15}{goal_reached:<10}{W5:<10}{r5:.2f}
+# {'=' * 50}
+# {'Total Reward':<35}{total_reward:.2f}
+# {'=' * 50}
+# """)
+
+        return total_reward
+
+    def _get_terminated(self):
+        scan_ranges = self.ros_int.get_scan_ranges()
+        robot_pose = self.ros_int.get_robot_pose()
+        goal_pose = self.goal_pose
+
+        distance = self.distance(goal_pose, robot_pose)
+        angle_diff = self.angle_diff(goal_pose[2], robot_pose[2])
+        # print(f"[{self.namespace}] Goal yaw = {goal_pose[2]:.2f}, Robot yaw = {robot_pose[2]:.2f}")
+
+        collision = self.detect_collision(scan_ranges)
+        goal_reached = self.is_goal_reached(distance, angle_diff)
+        # print(f"[{self.namespace}] Collision: {collision}, Goal reached: {goal_reached}")
+
+        return bool(collision or goal_reached) # env_cheker only works with python-bools (not numpy)   
+
+    def _get_truncated(self, step_count):
+        if step_count >= self.max_episode_steps:
+            print(f"[{self.namespace}] Episode truncated")
+            self.step_count = 0
+            return True
         return False
 
     def _get_info(self):
@@ -105,27 +211,83 @@ class NavigationEnv(gym.Env):
         while self.ros_int.get_gazebo_time() - start_time < period:
             pass
 
+
+
     def step(self, action):
-        scaled_action = self.scale_action(action)
-        self.ros_int.publish_action(scaled_action)
-        self.wait_action_period(ACTION_PERIOD)
+        self.step_count = self.step_count + 1
+        if self.is_gazebo_resetting():
+            # while the reset is not done, return null observations
+            self.wait_action_period(ACTION_PERIOD)
+            observation = {
+                'scan': np.zeros(360, dtype=np.float32),
+                'goal_rel_pose': np.zeros(3, dtype=np.float32),
+            }
+            reward = 0.0
+            terminated = False
+            truncated = True
+            info = {}    
+            return observation, reward, terminated, truncated, info
 
 
-        observation = self._get_obs()
-        reward = self._get_reward(observation)
-        done = self._get_done()
-        truncated = self._get_truncated(observation)
-        info = self._get_info()
+        # if self.namespace == 'env_0' and self.step_count == 10:
+        #     self.ros_int.reset_environment()
+        if self.reset_future is not None:
+            if self.reset_future.done() and self.is_resetting:
+                if self.reset_future.result().success:
+                    print(f"[{self.namespace}] Reset done")
+                    self.goal_pose = self.ros_int.set_random_goal_pose(max_distance=MAX_GOAL_DISTANCE)
+                    self.is_resetting = False
 
 
 
-        return observation, reward, done, truncated, info
+        if not self.is_resetting:
+            scaled_action = self.scale_action(action)
+            # start timer for angular velocity integration just before the first action is published
+            if self.last_time == 0.0:
+                self.last_time = self.ros_int.get_gazebo_time()
+            self.ros_int.publish_action(scaled_action)
+            self.wait_action_period(ACTION_PERIOD)
+
+            observation = self._get_obs()
+            reward = self._get_reward()
+            terminated = self._get_terminated()
+            truncated = self._get_truncated(self.step_count)
+            info = self._get_info()
+        else:
+            # while the reset is not done, return null observations
+            self.wait_action_period(ACTION_PERIOD)
+            observation = {
+                'scan': np.zeros(360, dtype=np.float32),
+                'goal_rel_pose': np.zeros(3, dtype=np.float32),
+            }
+            reward = 0.0
+            terminated = False
+            truncated = False
+            info = {}    
+
+        
+
+        return observation, reward, terminated, truncated, info
 
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.goal_pose = self.ros_int.set_random_goal_pose(max_distance=MAX_GOAL_DISTANCE)
-        # print(f"[{self.namespace}] New goal pose: {self.goal_pose}")
-        obs = self._get_obs()
-        info = self._get_info()
-        return obs, info
+        while self.is_gazebo_resetting():
+            pass
+        if not self.is_resetting:
+            self.totol_angle = 0.0 # reset total angle
+            self.reset_future = self.ros_int.reset_environment() # reset environment
+            self.is_resetting = True
+            # return null observations
+            observation = {
+                'scan': np.zeros(360, dtype=np.float32),
+                'goal_rel_pose': np.zeros(3, dtype=np.float32),
+            }
+            info = {}
+        else:
+            observation = self._get_obs()
+            info = self._get_info()
+        return observation, info
+
+    def close(self) -> None:
+        self.ros_int.node.destroy_node()
