@@ -58,6 +58,15 @@ class NavigationEnv(gym.Env):
                 "velocity": spaces.Box(
                     low=-1.0, high=1.0, shape=(2,), dtype=np.float32
                 ),
+                "scan_ranges": spaces.Box(
+                    low=-1.0, high=1.0, shape=(360,), dtype=np.float32
+                ),
+                "distance": spaces.Box(
+                    low=-1.0, high=1.0, shape=(1,), dtype=np.float32
+                ),
+                "angle": spaces.Box(
+                    low=-1.0, high=1.0, shape=(2,), dtype=np.float32
+                ),
             }
         )
 
@@ -104,12 +113,6 @@ class NavigationEnv(gym.Env):
             np.dot(robot_x_axis_vector, goal_distance_vector),
         )
 
-        # print(tabulate([["Goal distance", goal_distance],
-        #                 ["Goal angle", goal_angle * 180 / np.pi],
-        #                 ["Orientation", robot_orientation * 180 / np.pi],
-        #                 ["Scan min", scan_min],
-        #                 ["Scan max", scan_max]],
-        #                 ["", ""], tablefmt="pretty"))
 
         if min(scan_ranges) < COLLISION_THRESHOLD:
             collision = True
@@ -117,34 +120,43 @@ class NavigationEnv(gym.Env):
         if goal_distance < GOAL_THRESHOLD:
             goal_reached = True
 
-        scan_ranges = np.array(
-            self.normalize(scan_ranges, scan_min, scan_max), dtype=np.float32
-        )
+
 
         self.lin_vel = self.ros_interface.get_odom_linear_velocity()[0]
         self.ang_vel = self.ros_interface.get_odom_angular_velocity()[2]
 
-        robot_state = np.array(
-            [
-                self.normalize(goal_distance, 0.0, MAX_DISTANCE),
-                self.normalize(goal_angle, -np.pi, np.pi),
-                self.normalize(self.lin_vel, MIN_LINEAR_VEL, MAX_LINEAR_VEL),
-                self.normalize(self.ang_vel, MIN_ANGULAR_VEL, MAX_ANGULAR_VEL),
-            ],
-            dtype=np.float32,
+        linear_velocity = self.normalize_symmetric(self.lin_vel, MIN_LINEAR_VEL, MAX_LINEAR_VEL)
+        angular_velocity = self.normalize_symmetric(self.ang_vel, MIN_ANGULAR_VEL, MAX_ANGULAR_VEL)
+
+        velocity = np.array([linear_velocity, angular_velocity], dtype=np.float32)
+        scan_ranges = np.array(
+            self.normalize_symmetric(scan_ranges, scan_min, scan_max), dtype=np.float32
         )
-        # observation = {"scan_ranges": scan_ranges, "robot_state": robot_state}
-        observation = {"velocity": np.array([self.normalize_symmetric(self.lin_vel, MIN_LINEAR_VEL, MAX_LINEAR_VEL), 
-                                             self.normalize_symmetric(self.ang_vel, MIN_ANGULAR_VEL, MAX_ANGULAR_VEL)])}
+        distance = self.normalize_symmetric(goal_distance, 0.0, MAX_DISTANCE)
+        angle = np.array([np.cos(goal_angle), np.sin(goal_angle)], dtype=np.float32)
+
+        # print(tabulate([["Goal distance", goal_distance],
+        #                 ["Goal angle", goal_angle * 180 / np.pi],
+        #                 ["distance norm", distance],
+        #                 ["angle norm", angle]],
+        #                 ["", ""], tablefmt="pretty"))
+
+
+        observation = {"velocity": velocity,
+                       "scan_ranges": scan_ranges,
+                       "distance": distance,
+                       "angle": angle}
+                                             
 
         return observation, collision, goal_reached
 
     def _get_reward(self, observation, collision, goal_reached, action):
         # Optimized weights for 1280-step episodes
-        GOAL_REWARD = 200.0            # Increased for clear success signal
+        GOAL_REWARD = 100.0            # Increased for clear success signal
         COLLISION_PENALTY = -50.0      # Reduced to prevent over-caution
-        LINEAR_VEL_REWARD = 0.1        # Encourage forward movement
-        ANGULAR_VEL_PENALTY = -0.5     # Discourage unnecessary spinning
+        POS_LINEAR_VEL_REWARD = 0.015        # Encourage forward movement
+        NEG_LINEAR_VEL_PENALTY = -0.1      # Discourage backward movement
+        ANGULAR_VEL_PENALTY = -0.2     # Discourage unnecessary spinning
         DISTANCE_REWARD = 2.0          # Stronger incentive to approach goal
         OBSTACLE_PENALTY = -5.0        # Progressive penalty for obstacles
         TIME_PENALTY = -0.1            # Increased time pressure 
@@ -159,17 +171,18 @@ class NavigationEnv(gym.Env):
         # min_scan_range = self.denormalize(min(observation["scan_ranges"]), scan_min, scan_max)
         # goal_distance = self.denormalize(observation["robot_state"][0], 0.0, MAX_DISTANCE)
 
-        print(tabulate([["lin_vel", lin_vel],
-                        ["ang_vel", ang_vel],
-                        ["lin_reward = ", LINEAR_VEL_REWARD * max(lin_vel,0.0)],
-                        ["ang_reward = ", ANGULAR_VEL_PENALTY * abs(ang_vel)]],
-                        ["", ""], tablefmt="pretty"))
+        # print(tabulate([["lin_vel", lin_vel],
+        #                 ["ang_vel", ang_vel],
+        #                 ["lin_reward = ", LINEAR_VEL_REWARD * max(lin_vel,0.0)],
+        #                 ["ang_reward = ", ANGULAR_VEL_PENALTY * abs(ang_vel)]],
+        #                 ["", ""], tablefmt="pretty"))
         
         # Reward components
         reward = 0.0
-        # reward += GOAL_REWARD * goal_reached
-        # reward += COLLISION_PENALTY * collision
-        reward += LINEAR_VEL_REWARD * lin_vel if lin_vel > 0 else 0.0
+        reward += GOAL_REWARD * goal_reached
+        reward += COLLISION_PENALTY * collision
+        reward += POS_LINEAR_VEL_REWARD * max(lin_vel, 0.0)  
+        reward += NEG_LINEAR_VEL_PENALTY * abs(min(lin_vel, 0.0)) 
         reward += ANGULAR_VEL_PENALTY * abs(ang_vel)
         # reward += DISTANCE_REWARD / (1 + goal_distance)  # Inverse distance reward
         # reward += OBSTACLE_PENALTY * max(0, 1 - (min_scan_range/0.5))  # Progressive penalty <0.5m
@@ -209,7 +222,7 @@ class NavigationEnv(gym.Env):
         # (this actually happens every time the model is updated, in this case every 64 steps)
 
         self.ros_interface.unpause_simulation()
-        # self.ros_interface.publish_cmd_vel(self.action[0], self.action[1])
+        self.ros_interface.publish_cmd_vel(self.action[0], self.action[1])
         start_time = self.ros_interface.get_gazebo_time()
         current_time = start_time
         while current_time - start_time < DELTA_T:
@@ -223,6 +236,7 @@ class NavigationEnv(gym.Env):
         reward = self._get_reward(
             observation, collision, goal_reached, self.action
         )  # be sure action is the scaled one
+
         self.total_reward += reward
         terminated = self._get_terminated(collision, goal_reached)
         truncated = self._get_truncated()

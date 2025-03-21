@@ -191,6 +191,7 @@ def main() -> None:
             device="auto",               # Uses GPU if available
             policy_kwargs=dict(
                 net_arch=[256, 256],
+                log_std_init=-2        # (exp(-2): moderate exploration noise)
             )
         )
 
