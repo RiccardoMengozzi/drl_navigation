@@ -58,6 +58,7 @@ WORKDIR /ros_ws/src
 
 RUN git clone -b humble-devel https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
 # pass CACHE_BUST as a build argument to force a cache invalidation
+ARG CACHE_BUST
 RUN echo "CACHE BUST: ${CACHE_BUST}" && git clone https://github.com/RiccardoMengozzi/drl_navigation.git ${date} 
 
 WORKDIR /ros_ws
