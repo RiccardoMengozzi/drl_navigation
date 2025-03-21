@@ -136,8 +136,8 @@ class RosInterface(Node):
     def publish_cmd_vel(self, linear_x: float, angular_z: float) -> None:
         '''Publishes the cmd_vel message'''
         msg = Twist()
-        msg.linear.x = linear_x
-        msg.angular.z = angular_z
+        msg.linear.x = float(linear_x)
+        msg.angular.z = float(angular_z)
         self.cmd_vel_pub.publish(msg)
 
     ### GOAL POINT ###
