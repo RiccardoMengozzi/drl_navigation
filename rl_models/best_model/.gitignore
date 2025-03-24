@@ -1,4 +1,6 @@
 # Ignore everything in this directory
-*
+/*
+!/balmy-sea-253
+
 # Except this file
 !.gitignore
