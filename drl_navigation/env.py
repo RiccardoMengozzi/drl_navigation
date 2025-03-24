@@ -10,10 +10,10 @@ from .ros_interface import RosInterface
 MAX_EPISODE_STEPS = 1280
 MAX_DISTANCE = 17.0  # depending on the .world dimensions (in this case 12x12)
 
-MIN_LINEAR_VEL = -0.22
+MIN_LINEAR_VEL = 0.0
 MAX_LINEAR_VEL = 0.22
-MIN_ANGULAR_VEL = -2.84
-MAX_ANGULAR_VEL = 2.84
+MIN_ANGULAR_VEL = -1.00
+MAX_ANGULAR_VEL = 1.00
 
 DELTA_T = 0.1
 COLLISION_THRESHOLD = 0.15
@@ -29,8 +29,8 @@ class NavigationEnv(gym.Env):
         self.action = [0.0, 0.0]
         self.goal_position = [0.0, 0.0]
         self.step_count = 0
-        self.goal_min_distance = 0.5
-        self.goal_max_distance = 1.0
+        self.goal_min_distance = 4.5
+        self.goal_max_distance = MAX_DISTANCE
         self.increase_goal_distance = False
         self.total_reward = 0.0
 
@@ -154,9 +154,9 @@ class NavigationEnv(gym.Env):
         # Optimized weights for 1280-step episodes
         GOAL_REWARD = 100.0            # Increased for clear success signal
         COLLISION_PENALTY = -50.0      # Reduced to prevent over-caution
-        POS_LINEAR_VEL_REWARD = 0.015        # Encourage forward movement
+        POS_LINEAR_VEL_REWARD = 0.1        # Encourage forward movement
         NEG_LINEAR_VEL_PENALTY = -0.1      # Discourage backward movement
-        ANGULAR_VEL_PENALTY = -0.2     # Discourage unnecessary spinning
+        ANGULAR_VEL_PENALTY = -0.1     # Discourage unnecessary spinning
         DISTANCE_REWARD = 2.0          # Stronger incentive to approach goal
         OBSTACLE_PENALTY = -5.0        # Progressive penalty for obstacles
         TIME_PENALTY = -0.1            # Increased time pressure 
@@ -182,7 +182,7 @@ class NavigationEnv(gym.Env):
         reward += GOAL_REWARD * goal_reached
         reward += COLLISION_PENALTY * collision
         reward += POS_LINEAR_VEL_REWARD * max(lin_vel, 0.0)  
-        reward += NEG_LINEAR_VEL_PENALTY * abs(min(lin_vel, 0.0)) 
+        # reward += NEG_LINEAR_VEL_PENALTY * abs(min(lin_vel, 0.0)) 
         reward += ANGULAR_VEL_PENALTY * abs(ang_vel)
         # reward += DISTANCE_REWARD / (1 + goal_distance)  # Inverse distance reward
         # reward += OBSTACLE_PENALTY * max(0, 1 - (min_scan_range/0.5))  # Progressive penalty <0.5m
@@ -325,16 +325,16 @@ class NavigationEnv(gym.Env):
         x_robot = 0
         y_robot = 0
         # Change robot position
-        # x_robot = 0
-        # y_robot = 0
-        # position_ok = False
-        # while not position_ok:
-        #     x_robot = np.random.uniform(-5, 5)
-        #     y_robot = np.random.uniform(-5, 5)
-        #     position_ok = self.check_pos(x_robot, y_robot)
-        # self.ros_interface.set_entity_state(
-        #     "burger", x_robot, y_robot, np.random.uniform(-np.pi, np.pi)
-        # )
+        x_robot = 0
+        y_robot = 0
+        position_ok = False
+        while not position_ok:
+            x_robot = np.random.uniform(-5, 5)
+            y_robot = np.random.uniform(-5, 5)
+            position_ok = self.check_pos(x_robot, y_robot)
+        self.ros_interface.set_entity_state(
+            "burger", x_robot, y_robot, np.random.uniform(-np.pi, np.pi)
+        )
 
         # Change goal
         self.goal_position = self.set_new_goal(center=[x_robot, y_robot])

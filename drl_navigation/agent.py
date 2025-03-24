@@ -22,7 +22,7 @@ from .ros_interface import RosInterface
 
 TOTAL_TIMESTEPS = 256000
 MAX_EPISODE_STEPS = 640
-LOAD_MODEL = False
+LOAD_MODEL = True
     
 class CustomLoggingCallback(BaseCallback):
     def __init__(self, env: NavigationEnv, verbose=0):
@@ -196,7 +196,7 @@ def main() -> None:
         )
 
         if LOAD_MODEL:
-            old_model = SAC.load(f"{best_model_path}best_model.zip")
+            old_model = SAC.load(f"{checkpoints_path}{run.name}_256000_steps.zip")
             params = old_model.get_parameters()
             model.set_parameters(params, exact_match=True)
 
