@@ -26,7 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'agent = drl_navigation.agent:main',
-            'her_agent = drl_navigation.HER_agent:main',
+            'test = drl_navigation.test:main',
         ],
     },
 )
