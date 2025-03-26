@@ -132,7 +132,7 @@ class NavigationEnv(gym.Env):
         scan_ranges = np.array(
             self.normalize_symmetric(scan_ranges, scan_min, scan_max), dtype=np.float32
         )
-        distance = self.normalize_symmetric(goal_distance, 0.0, MAX_DISTANCE)
+        distance = np.array([self.normalize_symmetric(goal_distance, 0.0, MAX_DISTANCE)], dtype=np.float32)
         angle = np.array([np.cos(goal_angle), np.sin(goal_angle)], dtype=np.float32)
 
         # print(tabulate([["Goal distance", goal_distance],
@@ -206,8 +206,8 @@ class NavigationEnv(gym.Env):
         else:
             return False
 
-    def _get_info(self):
-        return {}
+    def _get_info(self, collision, goal_reached):
+        return {"collision": collision, "goal_reached": goal_reached}
 
     def step(self, action):
         self.step_count += 1
@@ -240,7 +240,7 @@ class NavigationEnv(gym.Env):
         self.total_reward += reward
         terminated = self._get_terminated(collision, goal_reached)
         truncated = self._get_truncated()
-        info = self._get_info()
+        info = self._get_info(collision, goal_reached)
 
         if goal_reached:
             self.increase_goal_distance = True
@@ -362,7 +362,7 @@ class NavigationEnv(gym.Env):
 
 
         observation, _, _ = self._get_obs()
-        info = self._get_info()
+        info = self._get_info(False, False)
 
         return observation, info
 

@@ -52,7 +52,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 RUN pip install --no-cache-dir --upgrade pip\
     && pip install --no-cache-dir \
     wandb \
-    tabulate 
+    tabulate \
+    vim
 
 WORKDIR /ros_ws/src
 

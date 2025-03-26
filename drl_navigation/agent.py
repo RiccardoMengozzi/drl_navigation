@@ -196,7 +196,7 @@ def main() -> None:
         )
 
         if LOAD_MODEL:
-            old_model = SAC.load(f"{checkpoints_path}{run.name}_256000_steps.zip")
+            old_model = SAC.load(f"{best_model_path}/best_model.zip")
             params = old_model.get_parameters()
             model.set_parameters(params, exact_match=True)
 
