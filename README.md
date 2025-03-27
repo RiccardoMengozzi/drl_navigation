@@ -10,9 +10,7 @@ This repository implements deep reinforcement learning for turlebot3 navigation 
 
 # Best model
 
-# Best model
-
-The model that you can see in the [video](docs/Preview.mp4), can be found [here](rl_models/best_model/balmy-sea-253). This model have been trained with a continual learning approach, totalling approximatly 750000 steps:
+The model that you can see in the [video](docs/Preview.gif), can be found [here](rl_models/best_model/balmy-sea-253). This model have been trained with a continual learning approach, totalling approximatly 750000 steps:
 
 1. Learn to maximize forward motion, minimizing angular velocity.
 2. Learn to avoid obstacles.
@@ -20,7 +18,7 @@ The model that you can see in the [video](docs/Preview.mp4), can be found [here]
 
 
 # Acknowledgements
-This repository is inspired by [TannerGilbert/Turtlebot3-DRL-Navigation](https://github.com/TannerGilbert/Turtlebot3-DRL-Navigation). Changes have been done to implement the training with Stable Baselines3 and Wandb.
+This repository is inspired by [TannerGilbert/Turtlebot3-DRL-Navigation](https://github.com/TannerGilbert/Turtlebot3-DRL-Navigation). Changes have been done to implement the training with Stable Baselines3 and WandB.
 
 # Installation
 >[!IMPORTANT]
@@ -98,6 +96,10 @@ Finally in `~/drl_nav_ws`:
 rosdep update
 rosdep install -i --from-path src --rosdistro humble -y
 ```
+And:
+```
+colcon build
+```
 
 
 >[!CAUTION]
@@ -122,6 +124,7 @@ This was due to the fact that a `model.config` was lacking from `turlebot3_autor
 For every terminal run:
 ```
 . /usr/share/gazebo/setup.sh
+source intall/setup.bash
 export TURTLEBOT3_MODEL=burger
 ```
 >[!TIP]
@@ -139,7 +142,7 @@ ros2 run drl_navigation agent
 ```
 
 >[!NOTE]
->The training logs are managed by Wandb. In order to use Wandb you need to create a Wandb account.
+>The training logs are managed by WandB. In order to use WandB you need to create a WandB account.
 
 
 # Test usage
@@ -174,7 +177,7 @@ In `~/drl_nav_ws/src/drl_navigation` run:
 docker build --build-arg CACHE_BUST=$(date +%s) -t img:latest .
 ```
 >[!NOTE]
-> THE `--build-arg CACHE_BUST=$(date +%s)` is needed to make sure the clones repositories are always updated.
+> THE `--build-arg CACHE_BUST=$(date +%s)` is needed to make sure the cloned repositories are always updated.
 
 # Docker usage
 Once the docker image is built properly in your machine, to run the container, since GUI applications (Gazebo, Rviz2) are present, some extra steps are needed.
