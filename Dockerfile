@@ -48,12 +48,17 @@ RUN pip install --no-cache-dir --upgrade pip \
     # wandb \
     # tabulate 
 
-# Install other used packages
+# Install other pip used packages
 RUN pip install --no-cache-dir --upgrade pip\
     && pip install --no-cache-dir \
     wandb \
-    tabulate \
-    vim
+    tabulate 
+
+# Install other apt-get used packages
+RUN apt-get update \
+    && apt-get install -y \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ros_ws/src
 
