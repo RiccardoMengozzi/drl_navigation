@@ -5,7 +5,7 @@
 
 This repository implements deep reinforcement learning for turlebot3 navigation tasks using Stable Baselines3.
 
-![Preview video](docs/Preview.mp4)
+![Preview video](docs/Preview.gif)
 
 
 # Best model
@@ -119,12 +119,48 @@ This was due to the fact that a `model.config` was lacking from `turlebot3_autor
 ```
 
 # Train Usage
-## Imposta wandb e tutti i parameteri
-## Train usage: fai partire simulation, fai partire agent, 
+For every terminal run:
+```
+. /usr/share/gazebo/setup.sh
+export TURTLEBOT3_MODEL=burger
+```
+>[!TIP]
+> Could be useful to insert those command in your `.bashrc`
+
+
+Start the simulation:
+```
+ros2 launch drl_navigation simulation.launch.py
+```
+
+Start the training:
+```
+ros2 run drl_navigation agent
+```
+
+>[!NOTE]
+>The training logs are managed by Wandb. In order to use Wandb you need to create a Wandb account.
+
 
 # Test usage
-## load the model
-## fai partire simulation, fai partire test.
+For every terminal run:
+```
+. /usr/share/gazebo/setup.sh
+export TURTLEBOT3_MODEL=burger
+```
+>[!TIP]
+> Could be useful to insert those command in your `.bashrc`
+
+Start the simulation:
+```
+ros2 launch drl_navigation simulation.launch.py
+```
+
+Start the test:
+```
+ros2 run drl_navigation test
+```
+
 
 
 # Docker installation
@@ -132,10 +168,10 @@ Either pull the image from DockerHub:
 ```
 docker pull riccardomengozzi/drl-navigation:latest
 ```
-Or build the image from the [Dockerfile](Dockerfile).
+Or build the image from the [Dockerfile](Dockerfile). 
 In `~/drl_nav_ws/src/drl_navigation` run:
 ```
-ocker build --build-arg CACHE_BUST=$(date +%s) -t img:latest .
+docker build --build-arg CACHE_BUST=$(date +%s) -t img:latest .
 ```
 >[!NOTE]
 > THE `--build-arg CACHE_BUST=$(date +%s)` is needed to make sure the clones repositories are always updated.
@@ -170,7 +206,7 @@ Also, during training, you would also need to share folders between the containe
 To do that, add these commands:
 
 ```
-docker run -it -v $PWD/src/drl_navigation/rl_logs:/ros_ws/src/drl_navigation/rl_logs -v $PWD/src/drl_navigation/rl_models:/ros_ws/src/drl_navigation/rl_models -v $PWD/wandb:/ros_ws/wandb --network=host --ipc=host -v /tmp/.X11-unix:/tmp/.X11-unix:rw --env=DISPLAY --gpus all --runtime=nvidia --env="QT_X11_NO_MITSHM=1" --env="NVIDIA_DRIVER_CAPABILITIES=all" --env="NVIDIA_VISIBLE_DEVICES=all" --device=/dev/dri:/dev/dri img
+docker run -it -v ~/drl_nav_ws/src/drl_navigation/rl_logs:/ros_ws/src/drl_navigation/rl_logs -v ~/drl_nav_ws/src/drl_navigation/rl_models:/ros_ws/src/drl_navigation/rl_models -v ~/drl_nav_ws/wandb:/ros_ws/wandb --network=host --ipc=host -v /tmp/.X11-unix:/tmp/.X11-unix:rw --env=DISPLAY --gpus all --runtime=nvidia --env="QT_X11_NO_MITSHM=1" --env="NVIDIA_DRIVER_CAPABILITIES=all" --env="NVIDIA_VISIBLE_DEVICES=all" --device=/dev/dri:/dev/dri img
 ```
 
 
