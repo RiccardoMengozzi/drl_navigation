@@ -149,6 +149,7 @@ ros2 run drl_navigation agent
 For every terminal run:
 ```
 . /usr/share/gazebo/setup.sh
+source intall/setup.bash
 export TURTLEBOT3_MODEL=burger
 ```
 >[!TIP]
