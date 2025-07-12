@@ -17,9 +17,6 @@ The model that you can see in the [video](docs/Preview.gif), can be found [here]
 3. Learn to reach the goal position. 
 
 
-# Acknowledgements
-This repository is inspired by [TannerGilbert/Turtlebot3-DRL-Navigation](https://github.com/TannerGilbert/Turtlebot3-DRL-Navigation). Changes have been done to implement the training with Stable Baselines3 and WandB.
-
 # Installation
 >[!IMPORTANT]
 > The repository has been tested on ROS Humble 
@@ -212,5 +209,11 @@ To do that, add these commands:
 ```
 docker run -it -v ~/drl_nav_ws/src/drl_navigation/rl_logs:/ros_ws/src/drl_navigation/rl_logs -v ~/drl_nav_ws/src/drl_navigation/rl_models:/ros_ws/src/drl_navigation/rl_models -v ~/drl_nav_ws/wandb:/ros_ws/wandb --network=host --ipc=host -v /tmp/.X11-unix:/tmp/.X11-unix:rw --env=DISPLAY --gpus all --runtime=nvidia --env="QT_X11_NO_MITSHM=1" --env="NVIDIA_DRIVER_CAPABILITIES=all" --env="NVIDIA_VISIBLE_DEVICES=all" --device=/dev/dri:/dev/dri img
 ```
+
+
+
+# Acknowledgements
+This repository is inspired by [TannerGilbert/Turtlebot3-DRL-Navigation](https://github.com/TannerGilbert/Turtlebot3-DRL-Navigation). Changes have been done to implement the training with Stable Baselines3 and WandB.
+
 
 
