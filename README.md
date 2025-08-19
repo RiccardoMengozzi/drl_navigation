@@ -121,7 +121,7 @@ This was due to the fact that a `model.config` was lacking from `turlebot3_autor
 For every terminal run:
 ```
 . /usr/share/gazebo/setup.sh
-source intall/setup.bash
+source install/setup.bash
 export TURTLEBOT3_MODEL=burger
 ```
 >[!TIP]
