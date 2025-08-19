@@ -82,7 +82,7 @@ cd ~/drl_nav_ws/src
 And clone the [drl_navigation](https://github.com/RiccardoMengozzi/drl_navigation) and [turlebot3_simulation](https://github.com/ROBOTIS-GIT/turtlebot3_simulations/tree/main) repositories:
 
 ```
-git clone -b humble-devel https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
+git clone -b humble https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
 git clone https://github.com/RiccardoMengozzi/drl_navigation.git
 
 ```
